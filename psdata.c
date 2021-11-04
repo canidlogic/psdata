@@ -83,13 +83,71 @@
 const char *pModule = NULL;
 
 /*
+ * Data controlling line output.
+ * 
+ * m_line_len is the maximum line length to allow.  It must be greater
+ * than zero.
+ * 
+ * m_line_pos is the number of characters that have been written on the
+ * current line.  It must be zero or greater.
+ * 
+ * m_line_count starts at zero and is incremented each time a line break
+ * (implicit or explicit) is output.
+ * 
+ * This is used by the write_char function to determine when to
+ * automatically insert line breaks.
+ */
+static int32_t m_line_len = DEFAULT_LINE;
+static int32_t m_line_pos = 0;
+static int32_t m_line_count = 0;
+
+/*
+ * File to direct character output to.
+ * 
+ * If this is NULL, stdout should be used.
+ */
+static FILE *m_out = NULL;
+
+/*
  * Local functions
  * ===============
  */
 
 /* Prototypes */
+static void write_char(int c);
+
 static int check_head(const char *pstr);
 static int parseInt(const char *pstr, int32_t *pv);
+
+/*
+ * Top-level function for writing a character to output.
+ * 
+ * The character to write is given as the c parameter.  It must be in
+ * US-ASCII printing range [0x20, 0x7e] or be the LF character.
+ * 
+ * This function uses the m_line_ static data to limit output line
+ * length.  Each time an explicit LF character is given to this
+ * function, m_line_pos is reset to zero.  Each time a non-LF character
+ * is given to this function, m_line_pos increments after the character
+ * is written.  If at the start of this function, m_line_pos is greater
+ * than or equal to m_line_len AND the given character is not LF, then
+ * an LF is inserted and m_line_pos is reset to zero before running the
+ * rest of the function.
+ * 
+ * The character will be output to the file indicated by the m_out
+ * static data variable.
+ * 
+ * Each LF character that is written to output -- whether it was
+ * explicitly passed to this function, or generated internally by this
+ * function -- 
+ * 
+ * Parameters:
+ * 
+ *   c - the character to output
+ */
+static void write_char(int c) {
+  /* @@TODO: */
+}
 
 /*
  * Check whether the given parameter is a valid header string.
@@ -254,6 +312,8 @@ int main(int argc, char *argv[]) {
   int flag_dsc = 0;
   const char *pHead = NULL;
   
+  FILE *pTemp = NULL;
+  
   /* Get program name */
   pModule = NULL;
   if ((argc > 0) && (argv != NULL)) {
@@ -264,7 +324,7 @@ int main(int argc, char *argv[]) {
   }
   
   /* On Windows only, set input mode to binary and output mode to
-   * text */
+   * binary */
 #ifdef PSDATA_WIN
   if (status) {
     if (_setmode(_fileno(stdin), _O_BINARY) == -1) {
@@ -274,9 +334,9 @@ int main(int argc, char *argv[]) {
     }
   }
   if (status) {
-    if (_setmode(_fileno(stdout), _O_TEXT) == -1) {
+    if (_setmode(_fileno(stdout), _O_BINARY) == -1) {
       status = 0;
-      fprintf(stderr, "%s: Failed to set output to text mode!\n",
+      fprintf(stderr, "%s: Failed to set output to binary mode!\n",
         pModule);
     }
   }
@@ -385,7 +445,44 @@ int main(int argc, char *argv[]) {
     }
   }
   
+  /* Set up the line control data */
+  if (status) {
+    m_line_len = line_len;
+    m_line_pos = 0;
+  }
+  
+  /* If we are in DSC mode, we will need to buffer all output into a
+   * temporary file, so create that file here and set it as the output
+   * target; otherwise, just set the output target directly to stdout */
+  if (status && flag_dsc) {
+    /* DSC mode, so open a temporary file and direct output to that
+     * temporary file */
+    pTemp = tmpfile();
+    if (pTemp == NULL) {
+      status = 0;
+      fprintf(stderr, "%s: Failed to create temporary file!\n",
+        pModule);
+    }
+    
+    if (status) {
+      m_out = pTemp;
+    }
+    
+  } else if (status) {
+    /* Not in DSC mode, so output directly to stdout */
+    m_out = stdout;
+  }
+  
   /* @@TODO: */
+  
+  /* Reset m_out to stdout */
+  m_out = stdout;
+  
+  /* Close the temporary file if open */
+  if (pTemp != NULL) {
+    fclose(pTemp);
+    pTemp = NULL;
+  }
   
   /* Invert status and return */
   if (status) {
