@@ -76,6 +76,12 @@
 #define WRITE_BUF (4096)
 
 /*
+ * The number of bytes in the transfer buffer used to write from the
+ * buffered temporary file to standard output in DSC mode.
+ */
+#define TRANS_BUF (4096)
+
+/*
  * Local data
  * ==========
  */
@@ -112,6 +118,11 @@ static int32_t m_line_count = 0;
  * If this is NULL, stdout should be used.
  */
 static FILE *m_out = NULL;
+
+/*
+ * The number of raw bytes written by buf_char().
+ */
+static int32_t m_data_count = 0;
 
 /*
  * Local functions
@@ -161,6 +172,16 @@ static void buf_char(int c) {
   /* Check parameter */
   if ((c < -1) || (c > 127)) {
     abort();
+  }
+  
+  /* If not special -1 signal, then increase byte counter */
+  if (c != -1) {
+    if (m_data_count < INT32_MAX) {
+      m_data_count++;
+    } else {
+      fprintf(stderr, "%s: Byte counter overflow!\n", pModule);
+      abort();
+    }
   }
   
   /* Flush output buffer if full or if -1 was passed and there is data
@@ -461,7 +482,10 @@ int main(int argc, char *argv[]) {
   const char *pHead = NULL;
   
   FILE *pTemp = NULL;
+  char *pbuf = NULL;
   const char *pc = NULL;
+  int32_t tcount = 0;
+  int32_t tlen = 0;
   
   /* Get program name */
   pModule = NULL;
@@ -654,17 +678,64 @@ int main(int argc, char *argv[]) {
           < 1) {
       fprintf(stderr, "%s: I/O error writing to standard output!\n",
         pModule);
+      abort();
     }
     line_break();
   }
   
-  /* @@TODO: */
+  /* If we are in DSC mode, rewind the temporary file and transfer
+   * everything to standard output */
+  if (status && flag_dsc) {
+    /* Rewind the temporary file */
+    if (fseek(pTemp, 0, SEEK_SET)) {
+      fprintf(stderr, "%s: Failed to rewind temporary file!\n",
+        pModule);
+      abort();
+    }
+    
+    /* Allocate buffer */
+    pbuf = (char *) malloc(TRANS_BUF);
+    if (pbuf == NULL) {
+      abort();
+    }
+    memset(pbuf, 0, TRANS_BUF);
+    
+    /* Keep transferring while data remains */
+    while (tcount < m_data_count) {
+      
+      /* Current transfer length is the minimum of the total number of
+       * bytes remaining to be transferred, and the size of the transfer
+       * buffer */
+      tlen = m_data_count - tcount;
+      if (tlen > TRANS_BUF) {
+        tlen = TRANS_BUF;
+      }
+      
+      /* Read bytes into the transfer buffer */
+      if (fread(pbuf, 1, (size_t) tlen, pTemp) != tlen) {
+        fprintf(stderr, "%s: I/O error reading from temporary file!\n",
+          pModule);
+        abort();
+      }
+      
+      /* Write the transfer buffer to standard output */
+      if (fwrite(pbuf, 1, (size_t) tlen, stdout) != tlen) {
+        fprintf(stderr, "%s: I/O error transferring to output!\n",
+          pModule);
+        abort();
+      }
+    
+      /* Increase the transfer count */
+      tcount += tlen;
+    }
+  }
   
   /* If we are in DSC mode, finish by writing the closing comment */
   if (status && flag_dsc) {
     if (printf("%%%%EndData") < 1) {
       fprintf(stderr, "%s: I/O error writing to standard output!\n",
         pModule);
+      abort();
     }
     line_break();
   }
@@ -676,6 +747,12 @@ int main(int argc, char *argv[]) {
   if (pTemp != NULL) {
     fclose(pTemp);
     pTemp = NULL;
+  }
+  
+  /* Free buffer if allocated */
+  if (pbuf != NULL) {
+    free(pbuf);
+    pbuf = NULL;
   }
   
   /* Invert status and return */
