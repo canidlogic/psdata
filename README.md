@@ -4,7 +4,7 @@ Utility for embedding binary data into PostScript with Base-85 encoding.
 
 Supports embedding both raw Base-85 streams as well as Base-85 streams that are appropriately wrapped for use in PostScript programs following the Document Structuring Conventions.
 
-Properly supports setting binary mode on standard input on the Windows platform at the start of the program.  Standard output on Windows is set into text mode so that LF line breaks are automatically translated to CR+LF line breaks.
+Properly supports setting binary mode on standard input and output on the Windows platform at the start of the program.  On Windows, all line breaks will be CR+LF in output instead of LF.
 
 ## Syntax
 
@@ -48,6 +48,6 @@ The source file preprocessor detects whether it is being compiled on Windows by 
 
 If any of those constants are defined by the environment, then the source file preprocessor will define a constant `PSDATA_WIN` which indicates that the file is being compiled on a Windows environment.  You can force the preprocessor to assume a Windows environment by defining the `PSDATA_WIN` constant during compilation.
 
-If `PSDATA_WIN` gets defined, then the `<io.h>` and `<fcntl.h>` headers will also be imported.  Furthermore, the extension functions `_setmode()` and `_fileno()` will be used to set binary mode on standard input and text mode on standard output at the beginning of the program.  This is not necessary on POSIX platforms, where there is no difference between text and binary modes.
+If `PSDATA_WIN` gets defined, then the `<io.h>` and `<fcntl.h>` headers will also be imported.  Furthermore, the extension functions `_setmode()` and `_fileno()` will be used to set binary mode on standard input and standard output at the beginning of the program.  (This is not necessary on POSIX platforms, where there is no difference between text and binary modes.)  Finally, the output function will change LF characters into CR+LF sequences on Windows.
 
 Normally, Windows platform support should be automatic so just compile the file normally as a C console program on Windows.
