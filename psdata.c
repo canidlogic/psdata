@@ -82,6 +82,11 @@
 #define TRANS_BUF (4096)
 
 /*
+ * The number of bytes to buffer while reading input for encoding.
+ */
+#define ENCODE_BUF (4096)
+
+/*
  * Local data
  * ==========
  */
@@ -133,6 +138,9 @@ static int32_t m_data_count = 0;
 static void buf_char(int c);
 static void write_char(int c);
 static void line_break(void);
+
+static void encode_dword(uint32_t eax, int pad);
+static int encode_input(void);
 
 static int check_head(const char *pstr);
 static int parseInt(const char *pstr, int32_t *pv);
@@ -316,6 +324,138 @@ static void line_break(void) {
       pModule);
     abort();
   }
+}
+
+/*
+ * Encode an unsigned 32-bit into Base-85 with possible padding.
+ * 
+ * eax is the unsigned 32-bit value to encode.  If there is padding, the
+ * padding must be in the least significant bytes.
+ * 
+ * pad is the number of bytes of padding.  It must be in range [0, 3].
+ * 
+ * The Base-85 encoded characters will be written to write_char().  See
+ * that function for further information.
+ * 
+ * Parameters:
+ * 
+ *   eax - the binary value to encode
+ * 
+ *   pad - the number of bytes of padding
+ */
+static void encode_dword(uint32_t eax, int pad) {
+  
+  char buf[5];
+  int i = 0;
+  int count = 0;
+  
+  /* Initialize buffer */
+  memset(buf, 0, 5);
+  
+  /* Check parameters */
+  if ((pad < 0) || (pad > 3)) {
+    abort();
+  }
+  
+  /* If there are no padding bytes AND the value is zero, then use the
+   * special "z" code */
+  if ((pad == 0) && (eax == 0)) {
+    write_char('z');
+    return;
+  }
+  
+  /* Split the numeric value into base-85 digits and place in big endian
+   * order into buf */
+  for(i = 4; i >= 0; i--) {
+    buf[i] = (char) (eax % 85);
+    eax = eax / 85;
+  }
+  
+  /* The number of digits to output is five less any padding bytes */
+  count = 5 - pad;
+  
+  /* Output digits, encoded to ASCII */
+  for(i = 0; i < count; i++) {
+    write_char(buf[i] + 0x21);
+  }
+}
+
+/*
+ * Read all binary data from standard input, encode it in Base-85, and
+ * write the Base-85 characters to the write_char() function.
+ * 
+ * See the write_char() function for further information about output.
+ * 
+ * Return:
+ * 
+ *   non-zero if successful, zero if error
+ */
+static int encode_input(void) {
+  
+  static uint8_t buf[ENCODE_BUF];
+  
+  int status = 1;
+  int32_t rcount = 0;
+  int32_t pcount = 0;
+  
+  uint32_t eax = 0;
+  int cx = 0;
+  
+  /* Clear the encoding buffer */
+  memset(buf, 0, ENCODE_BUF);
+  
+  /* Keep processing while we read data */
+  for(rcount = (int32_t) fread(buf, 1, ENCODE_BUF, stdin);
+      rcount > 0;
+      rcount = (int32_t) fread(buf, 1, ENCODE_BUF, stdin)) {
+    
+    /* Reset processor count */
+    pcount = 0;
+    
+    /* Accumulate all the data */
+    while (pcount < rcount) {
+      /* Add another byte to the accumulator */
+      eax = (eax << 8) | ((uint32_t) buf[pcount]);
+      cx++;
+      pcount++;
+      
+      /* If we got a full accumulator, encode that without any padding
+       * and reset accumulator */
+      if (cx >= 4) {
+        encode_dword(eax, 0);
+        eax = 0;
+        cx = 0;
+      }
+    }
+  }
+  
+  /* Check whether we stopped because end of input reached or error */
+  if (!feof(stdin)) {
+    /* Not EOF, so must be a read error */
+    status = 0;
+  }
+  
+  /* If partial data remains in accumulator, pad and output the dword
+   * with padding */
+  if (cx > 0) {
+    /* Reset padding count */
+    pcount = 0;
+    
+    /* Pad */
+    while (cx < 4) {
+      eax <<= 8;
+      cx++;
+      pcount++;
+    }
+    
+    /* Output with padding and reset accumulator */
+    encode_dword(eax, (int) pcount);
+    eax = 0;
+    cx = 0;
+  }
+  
+  /* Return status */
+  return status;
 }
 
 /*
@@ -657,7 +797,14 @@ int main(int argc, char *argv[]) {
     write_char('\n');
   }
   
-  /* @@TODO: */
+  /* Encode all the data from standard input */
+  if (status) {
+    if (!encode_input()) {
+      status = 0;
+      fprintf(stderr, "%s: Encoding failed while reading!\n",
+        pModule);
+    }
+  }
   
   /* Write the end of stream marker */
   if (status) {
