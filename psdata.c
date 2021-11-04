@@ -121,6 +121,7 @@ static FILE *m_out = NULL;
 /* Prototypes */
 static void buf_char(int c);
 static void write_char(int c);
+static void line_break(void);
 
 static int check_head(const char *pstr);
 static int parseInt(const char *pstr, int32_t *pv);
@@ -267,6 +268,32 @@ static void write_char(int c) {
     
     /* Increase the line position */
     m_line_pos++;
+  }
+}
+
+/*
+ * Write a line break to standard output.
+ * 
+ * CAUTION:  Do NOT use this function in places where you are using the
+ * write_char() function, because this function outputs directly to
+ * standard output ignoring any buffering and redirection.
+ */
+static void line_break(void) {
+  
+  /* On Windows only, CR is required first */
+#ifdef PSDATA_WIN
+  if (putchar('\r') != '\r') {
+    fprintf(stderr, "%s: I/O error writing to standard output!\n",
+      pModule);
+    abort();
+  }
+#endif
+  
+  /* Write the LF character */
+  if (putchar('\n') != '\n') {
+    fprintf(stderr, "%s: I/O error writing to standard output!\n",
+      pModule);
+    abort();
   }
 }
 
@@ -621,7 +648,26 @@ int main(int argc, char *argv[]) {
     write_char(-1);
   }
   
+  /* If we are in DSC mode, now we can write the start of data tag */
+  if (status && flag_dsc) {
+    if (printf("%%%%BeginData: %ld ASCII Lines", (long) m_line_count)
+          < 1) {
+      fprintf(stderr, "%s: I/O error writing to standard output!\n",
+        pModule);
+    }
+    line_break();
+  }
+  
   /* @@TODO: */
+  
+  /* If we are in DSC mode, finish by writing the closing comment */
+  if (status && flag_dsc) {
+    if (printf("%%%%EndData") < 1) {
+      fprintf(stderr, "%s: I/O error writing to standard output!\n",
+        pModule);
+    }
+    line_break();
+  }
   
   /* Reset m_out to stdout */
   m_out = stdout;
