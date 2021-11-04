@@ -71,6 +71,11 @@
 #define MIN_LINE (16)
 
 /*
+ * The number of characters to buffer while writing the data.
+ */
+#define WRITE_BUF (4096)
+
+/*
  * Local data
  * ==========
  */
@@ -114,16 +119,85 @@ static FILE *m_out = NULL;
  */
 
 /* Prototypes */
+static void buf_char(int c);
 static void write_char(int c);
 
 static int check_head(const char *pstr);
 static int parseInt(const char *pstr, int32_t *pv);
 
 /*
+ * Buffered writing function for output characters.
+ * 
+ * Clients should use write_char().  This function is more low level.
+ * 
+ * c is the unsigned byte value to write, in range [0, 127].  As a
+ * special case, -1 may be passed as the c value to flush any characters
+ * that are buffered.
+ * 
+ * This function will accumulate characters into an internal buffer and
+ * wait until the buffer fills to flush the data.  The data is flushed
+ * by writing it to the file indicated by the static data m_out.
+ * 
+ * Parameters:
+ * 
+ *   c - the character to output, or -1 to flush buffers
+ */
+static void buf_char(int c) {
+  
+  FILE *pOut = NULL;
+  
+  static char s_buf[WRITE_BUF];
+  static int s_buf_init = 0;
+  static int32_t s_buf_count = 0;
+  
+  /* Initialize static buffer if necessary */
+  if (!s_buf_init) {
+    s_buf_init = 1;
+    s_buf_count = 0;
+    memset(s_buf, 0, WRITE_BUF);
+  }
+  
+  /* Check parameter */
+  if ((c < -1) || (c > 127)) {
+    abort();
+  }
+  
+  /* Flush output buffer if full or if -1 was passed and there is data
+   * in the buffer */
+  if ((s_buf_count >= WRITE_BUF) || ((c == -1) && (s_buf_count > 0))) {
+    
+    /* Determine output file */
+    if (m_out != NULL) {
+      pOut = m_out;
+    } else {
+      pOut = stdout;
+    }
+    
+    /* Write buffered data to output */
+    if (fwrite(s_buf, 1, (size_t) s_buf_count, pOut) != s_buf_count) {
+      fprintf(stderr, "%s: I/O error writing to temporary file!\n",
+        pModule);
+      abort();
+    }
+    
+    /* Reset buffer */
+    s_buf_count = 0;
+  }
+  
+  /* Add character to buffer unless -1 was passed */
+  if (c >= 0) {
+    s_buf[s_buf_count] = (char) c;
+    s_buf_count++;
+  }
+}
+
+/*
  * Top-level function for writing a character to output.
  * 
  * The character to write is given as the c parameter.  It must be in
- * US-ASCII printing range [0x20, 0x7e] or be the LF character.
+ * US-ASCII printing range [0x20, 0x7e] or be the LF character.  As a
+ * special case, pass -1 after you have written all data to make sure
+ * that any internal buffers are flushed to the output file.
  * 
  * This function uses the m_line_ static data to limit output line
  * length.  Each time an explicit LF character is given to this
@@ -134,19 +208,66 @@ static int parseInt(const char *pstr, int32_t *pv);
  * an LF is inserted and m_line_pos is reset to zero before running the
  * rest of the function.
  * 
- * The character will be output to the file indicated by the m_out
- * static data variable.
+ * The character will be output to the buffered writing function
+ * buf_char().  This function then outputs to the data file selected by
+ * the m_out static data.
  * 
  * Each LF character that is written to output -- whether it was
  * explicitly passed to this function, or generated internally by this
- * function -- 
+ * function -- will increment m_line_count.  On Windows only, each LF
+ * character on output will be transformed into a CR+LF sequence.
  * 
  * Parameters:
  * 
- *   c - the character to output
+ *   c - the character to output, or -1 to flush buffers
  */
 static void write_char(int c) {
-  /* @@TODO: */
+  
+  /* Check parameter */
+  if ((c != -1) && (c != '\n') && ((c < 0x20) || (c > 0x7e))) {
+    abort();
+  }
+  
+  /* Check type of character given */
+  if (c == -1) {
+    /* Buffer flush, so just pass through */
+    buf_char(-1);
+    
+  } else if (c == '\n') {
+    /* Explicit line break, so begin by resetting line position */
+    m_line_pos = 0;
+    
+    /* Increase line count, watching for overflow */
+    if (m_line_count < INT32_MAX) {
+      m_line_count++;
+    } else {
+      fprintf(stderr, "%s: Line counter overflow!\n", pModule);
+      abort();
+    }
+    
+    /* On Windows only, output a CR character before LF */
+#ifdef PSDATA_WIN
+    buf_char('\r');
+#endif
+
+    /* Output the line break */
+    buf_char('\n');
+    
+  } else {
+    /* Character other than a line break, so first check whether we need
+     * to insert an implicit line break */
+    if (m_line_pos >= m_line_len) {
+      /* We need to insert an implicit line break, so recursively call
+       * this function with an explicit line break */
+      write_char('\n');
+    }
+    
+    /* Output the character now */
+    buf_char(c);
+    
+    /* Increase the line position */
+    m_line_pos++;
+  }
 }
 
 /*
@@ -313,6 +434,7 @@ int main(int argc, char *argv[]) {
   const char *pHead = NULL;
   
   FILE *pTemp = NULL;
+  const char *pc = NULL;
   
   /* Get program name */
   pModule = NULL;
@@ -471,6 +593,32 @@ int main(int argc, char *argv[]) {
   } else if (status) {
     /* Not in DSC mode, so output directly to stdout */
     m_out = stdout;
+  }
+  
+  /* We can't do any DSC header until we've buffered all the encoded
+   * output and counted the total number of lines, so we will ignore the
+   * DSC flag until later -- begin by writing the header line followed
+   * by a line break, if a header line was defined */
+  if (status && (pHead != NULL)) {
+    for(pc = pHead; *pc != 0; pc++) {
+      write_char(*pc);
+    }
+    write_char('\n');
+  }
+  
+  /* @@TODO: */
+  
+  /* Write the end of stream marker */
+  if (status) {
+    write_char('\n');
+    write_char('~');
+    write_char('>');
+    write_char('\n');
+  }
+  
+  /* Flush any buffered data */
+  if (status) {
+    write_char(-1);
   }
   
   /* @@TODO: */
