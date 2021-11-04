@@ -20,7 +20,7 @@ Using the `-dsc` tag will force `psdata` to buffer all Base-85 data in a tempora
 
     -head [text]
 
-Add a header line to the Base-85 data stream.  `[text]` is the header line to add.  This may only include visible, printing US-ASCII characters, and the space character (range [0x20, 0x7e]).  It may furthermore have at most 255 characters.
+Add a header line to the Base-85 data stream.  `[text]` is the header line to add.  This may only include visible, printing US-ASCII characters, and the space character (range [0x20, 0x7e]).  It may furthermore have at most 255 characters.  Finally, its length may not exceed the maximum line length, which is either the default value of 72 or a different value specified with the `-len` option.
 
 The header line, exactly as it is, followed by one line break, will be printed before the start of the Base-85 data stream.  If the `-dsc` option is also specified, the header line will occur after the `%%BeginData` tag line, and the header line and the following blank line will be included in the line count given in the `%%BeginData` tag line.
 
@@ -28,7 +28,7 @@ When accessing the embedded Base-85 data stream in the PostScript program using 
 
     -len [count]
 
-Set the maximum line length on output.  `[count]` is the maximum number of characters per line, excluding the line break.  If this option is not specified, a default value of 72 is used.  This limit does _not_ apply to a header line included with the `-head` option.
+Set the maximum line length on output.  `[count]` is the maximum number of characters per line, excluding the line break.  If this option is not specified, a default value of 72 is used.
 
 The valid range of `[count]` values is [16, 255].  Lines are not allowed to be longer than 255 characters (excluding line break) according to the Document Structuring Conventions.
 
